@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Coin Collector</title>
+<style>
+  :root{
+    --ink:#191320;
+    --panel:#211a28;
+    --panel-edge:#3a2e44;
+    --gold:#f2b73c;
+    --gold-dim:#a97f2a;
+    --amber:#e8873b;
+    --danger:#e0503b;
+    --fog:#241d2c;
+    --text:#efe6d8;
+    --text-dim:#b9aca0;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;width:100%;height:100%;background:var(--ink);overflow:hidden;
+    font-family:'Courier New',ui-monospace,monospace;color:var(--text);}
+  #gameCanvas{position:fixed;inset:0;display:block;}
+
+  .stripe{
+    height:6px;width:100%;
+    background:repeating-linear-gradient(135deg,var(--gold) 0 14px,#191320 14px 28px);
+    box-shadow:0 0 8px rgba(242,183,60,.35);
+  }
+
+  /* ---------- HUD ---------- */
+  #hud{position:fixed;inset:0;pointer-events:none;z-index:5;display:none;}
+  .hudCorner{position:absolute;padding:10px 16px;background:rgba(25,19,32,.72);
+    border:1px solid var(--panel-edge);backdrop-filter:blur(2px);}
+  #coinHud{top:18px;left:18px;font-size:20px;letter-spacing:2px;color:var(--gold);
+    display:flex;align-items:center;gap:10px;}
+  #coinHud .icon{width:14px;height:14px;border-radius:50%;
+    background:radial-gradient(circle at 35% 30%,#fff6d8,var(--gold) 55%,var(--gold-dim));
+    box-shadow:0 0 6px var(--gold);}
+  #timerHud{top:18px;right:18px;font-size:22px;letter-spacing:3px;text-align:right;}
+  #timerHud .lbl{font-size:10px;letter-spacing:3px;color:var(--text-dim);display:block;margin-bottom:2px;}
+  #timerHud.warn{color:var(--danger);animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.45;}}
+  #crosshair{position:absolute;top:50%;left:50%;width:6px;height:6px;margin:-3px 0 0 -3px;
+    border-radius:50%;background:var(--text);opacity:.8;}
+  #hintBar{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);
+    font-size:12px;letter-spacing:2px;color:var(--text-dim);white-space:nowrap;
+    transition:opacity 1.2s ease;text-align:center;}
+  #toast{position:absolute;top:70px;left:50%;transform:translateX(-50%);
+    font-size:13px;letter-spacing:2px;color:var(--gold);opacity:0;transition:opacity .3s,transform .3s;}
+
+  /* ---------- Overlays ---------- */
+  .overlay{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center,rgba(36,29,44,.55),rgba(15,11,19,.92));}
+  .panel{width:min(560px,88vw);background:var(--panel);border:1px solid var(--panel-edge);
+    box-shadow:0 20px 60px rgba(0,0,0,.6);}
+  .panelBody{padding:34px 36px 30px;}
+  h1{font-size:clamp(30px,5vw,42px);margin:0 0 6px;letter-spacing:6px;color:var(--gold);
+    text-shadow:0 0 18px rgba(242,183,60,.35);}
+  .sub{color:var(--text-dim);font-size:13px;letter-spacing:2px;margin:0 0 22px;line-height:1.7;}
+  .rules{list-style:none;margin:0 0 26px;padding:0;font-size:12.5px;letter-spacing:1px;color:var(--text);}
+  .rules li{display:flex;gap:10px;padding:7px 0;border-bottom:1px dashed rgba(255,255,255,.08);}
+  .rules li span.k{color:var(--gold);min-width:118px;display:inline-block;}
+  button.cta{width:100%;padding:15px;background:var(--gold);border:none;color:#1b1420;
+    font-weight:bold;font-size:15px;letter-spacing:4px;cursor:pointer;font-family:inherit;
+    transition:transform .15s, background .15s;}
+  button.cta:hover{background:#ffcb5c;transform:translateY(-1px);}
+  button.cta:active{transform:translateY(0);}
+  #resultCount{color:var(--gold);}
+  #loseTitle{color:var(--danger);text-shadow:0 0 18px rgba(224,80,59,.4);}
+  #pauseHint{margin-top:14px;font-size:11px;color:var(--text-dim);letter-spacing:1px;text-align:center;}
+  .hidden{display:none !important;}
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="coinHud" class="hudCorner"><span class="icon"></span><span id="coinCountText">0 / 0</span></div>
+  <div id="timerHud" class="hudCorner"><span class="lbl">TIME LEFT</span><span id="timerText">60:00</span></div>
+  <div id="crosshair"></div>
+  <div id="toast"></div>
+  <div id="hintBar">W A S D&nbsp; MOVE&nbsp;&nbsp;·&nbsp;&nbsp; MOUSE&nbsp; LOOK&nbsp;&nbsp;·&nbsp;&nbsp; SPACE&nbsp; JUMP&nbsp;&nbsp;·&nbsp;&nbsp; SHIFT&nbsp; RUN&nbsp;&nbsp;·&nbsp;&nbsp; ESC&nbsp; PAUSE</div>
+</div>
+
+<!-- Start screen -->
+<div class="overlay" id="startScreen">
+  <div class="panel">
+    <div class="stripe"></div>
+    <div class="panelBody">
+      <h1>COIN COLLECTOR</h1>
+      <p class="sub">A SPRAWLING SALVAGE YARD. EVERY COIN COUNTED. NOTHING LEFT BEHIND.</p>
+      <ul class="rules">
+        <li><span class="k">OBJECTIVE</span> Recover every coin in the yard — on the ground, atop crates, up the stairs, on the rooftop, and tucked out of sight.</li>
+        <li><span class="k">TIME LIMIT</span> 60:00 minutes. The clock starts the moment you step in.</li>
+        <li><span class="k">WIN</span> Collect all coins before time runs out.</li>
+        <li><span class="k">LOSE</span> The clock hits zero with coins still missing.</li>
+      </ul>
+      <button class="cta" id="startBtn">ENTER THE YARD</button>
+      <div id="pauseHint">Click the button, then click the screen once more to lock your mouse.</div>
+    </div>
+    <div class="stripe"></div>
+  </div>
+</div>
+
+<!-- Pause screen -->
+<div class="overlay hidden" id="pauseScreen">
+  <div class="panel">
+    <div class="stripe"></div>
+    <div class="panelBody">
+      <h1 style="font-size:28px;">PAUSED</h1>
+      <p class="sub">THE CLOCK IS STILL RUNNING.</p>
+      <button class="cta" id="resumeBtn">RESUME</button>
+    </div>
+    <div class="stripe"></div>
+  </div>
+</div>
+
+<!-- Win screen -->
+<div class="overlay hidden" id="winScreen">
+  <div class="panel">
+    <div class="stripe"></div>
+    <div class="panelBody">
+      <h1>YARD CLEARED</h1>
+      <p class="sub">EVERY LAST COIN RECOVERED — <span id="resultCount"></span><br>TIME REMAINING: <span id="resultTime" style="color:var(--gold);"></span></p>
+      <button class="cta" id="restartBtnWin">PLAY AGAIN</button>
+    </div>
+    <div class="stripe"></div>
+  </div>
+</div>
+
+<!-- Lose screen -->
+<div class="overlay hidden" id="loseScreen">
+  <div class="panel">
+    <div class="stripe"></div>
+    <div class="panelBody">
+      <h1 id="loseTitle">TIME'S UP</h1>
+      <p class="sub">COINS RECOVERED: <span id="loseCount" style="color:var(--gold);"></span><br>SOME WERE NEVER FOUND.</p>
+      <button class="cta" id="restartBtnLose">TRY AGAIN</button>
+    </div>
+    <div class="stripe"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* ============================= CONSTANTS ============================= */
+const GAME_SECONDS = 3600;      // 1 hour
+const GRAVITY = -22;
+const JUMP_SPEED = 8;
+const WALK_SPEED = 6.2;
+const RUN_SPEED = 10.5;
+const STEP_LIMIT = 0.55;        // max height player can walk up without jumping
+const BOUND = 39;               // play area half-size
+const EYE_HEIGHT = 1.7;
+const COIN_RADIUS = 1.35;
+const MOUSE_SENS = 0.0022;
+
+/* ============================= THREE SETUP ============================= */
+const canvas = document.getElementById('gameCanvas');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const FOG_COLOR = 0x2a2233;
+scene.background = new THREE.Color(FOG_COLOR);
+scene.fog = new THREE.Fog(FOG_COLOR, 30, 105);
+
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth/window.innerHeight, 0.1, 500);
+camera.rotation.order = 'YXZ';
+
+window.addEventListener('resize', ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* ============================= LIGHTING ============================= */
+scene.add(new THREE.HemisphereLight(0x8892c9, 0x33291f, 0.65));
+
+const sun = new THREE.DirectionalLight(0xffb066, 1.15);
+sun.position.set(-40, 55, -20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left = -55; sun.shadow.camera.right = 55;
+sun.shadow.camera.top = 55; sun.shadow.camera.bottom = -55;
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 150;
+sun.shadow.bias = -0.0015;
+scene.add(sun);
+
+const fillLight = new THREE.DirectionalLight(0x6f6fb0, 0.35);
+fillLight.position.set(30,20,40);
+scene.add(fillLight);
+
+/* ============================= MATERIALS ============================= */
+function hazardTexture(){
+  const c = document.createElement('canvas'); c.width=64; c.height=64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#1c1620'; ctx.fillRect(0,0,64,64);
+  ctx.strokeStyle = '#e8b23c'; ctx.lineWidth = 18;
+  for(let i=-64;i<64;i+=24){ ctx.beginPath(); ctx.moveTo(i,64); ctx.lineTo(i+64,0); ctx.stroke(); }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+function groundTexture(){
+  const c = document.createElement('canvas'); c.width=256; c.height=256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#4a4038'; ctx.fillRect(0,0,256,256);
+  for(let i=0;i<1800;i++){
+    ctx.fillStyle = `rgba(${20+Math.random()*30},${15+Math.random()*25},${10+Math.random()*20},0.5)`;
+    ctx.fillRect(Math.random()*256, Math.random()*256, 2+Math.random()*3, 2+Math.random()*3);
+  }
+  ctx.strokeStyle='rgba(0,0,0,0.25)'; ctx.lineWidth=2;
+  ctx.strokeRect(0,0,256,256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(20,20);
+  return tex;
+}
+
+const matGround = new THREE.MeshStandardMaterial({map: groundTexture(), roughness:1, metalness:0});
+const matCrate  = new THREE.MeshStandardMaterial({color:0xb5793f, roughness:0.85, metalness:0.05});
+const matCrateEdge = new THREE.MeshStandardMaterial({color:0x5c3d20, roughness:0.9});
+const matConcrete = new THREE.MeshStandardMaterial({color:0x8a8a92, roughness:0.9, metalness:0.05});
+const matHazard = new THREE.MeshStandardMaterial({map:hazardTexture(), roughness:0.8});
+const matWall = new THREE.MeshStandardMaterial({color:0x352c3e, roughness:0.95});
+const matWallTrim = new THREE.MeshStandardMaterial({color:0xe8873b, roughness:0.6, emissive:0x39220c, emissiveIntensity:0.4});
+const matCoin = new THREE.MeshStandardMaterial({color:0xf2b73c, roughness:0.25, metalness:0.85, emissive:0x5c3d0a, emissiveIntensity:0.55});
+
+/* ============================= WORLD GEOMETRY ============================= */
+const colliders = [];   // meshes used for ground-height raycasting
+const coins = [];       // {mesh, collected}
+
+function addCollider(mesh){ colliders.push(mesh); return mesh; }
+
+function makeBox(w,h,d,mat,x,y,z,castShadow=true){
+  const geo = new THREE.BoxGeometry(w,h,d);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x,y,z);
+  mesh.castShadow = castShadow;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  // crisp edge lines for a stylised, readable look
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({color:0x120e16, transparent:true, opacity:0.35}));
+  mesh.add(edges);
+  return mesh;
+}
+
+// ---- Ground ----
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(BOUND*2+4, BOUND*2+4), matGround);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+addCollider(ground);
+
+// ---- Perimeter walls ----
+function perimeterWall(x,z,w,d){
+  const wall = makeBox(w, 8, d, matWall, x, 4, z);
+  const trim = makeBox(w+0.15, 0.4, d+0.15, matWallTrim, x, 7.9, z, false);
+  scene.add(trim);
+}
+perimeterWall(0, -BOUND-1, BOUND*2+4, 2);
+perimeterWall(0,  BOUND+1, BOUND*2+4, 2);
+perimeterWall(-BOUND-1, 0, 2, BOUND*2+4);
+perimeterWall( BOUND+1, 0, 2, BOUND*2+4);
+
+// ---- Rooftop platform (reached via stairs) ----
+const PLAT_X=10, PLAT_Z=10, PLAT_TOP=4, PLAT_W=13, PLAT_D=13;
+const platform = makeBox(PLAT_W, PLAT_TOP, PLAT_D, matConcrete, PLAT_X, PLAT_TOP/2, PLAT_Z);
+addCollider(platform);
+// hazard trim around roof edge
+makeBox(PLAT_W+0.3, 0.15, 0.5, matHazard, PLAT_X, PLAT_TOP+0.08, PLAT_Z-PLAT_D/2, false);
+makeBox(PLAT_W+0.3, 0.15, 0.5, matHazard, PLAT_X, PLAT_TOP+0.08, PLAT_Z+PLAT_D/2, false);
+makeBox(0.5, 0.15, PLAT_D, matHazard, PLAT_X-PLAT_W/2, PLAT_TOP+0.08, PLAT_Z, false);
+makeBox(0.5, 0.15, PLAT_D, matHazard, PLAT_X+PLAT_W/2, PLAT_TOP+0.08, PLAT_Z, false);
+// a couple of low roof-vent boxes for detail + climbable interest
+makeBox(1.4,1,1.4, matConcrete, PLAT_X-3, PLAT_TOP+0.5, PLAT_Z-3);
+addCollider(scene.children[scene.children.length-1]);
+
+// ---- Staircase leading up to platform (south side, -Z approach) ----
+const STAIR_X = PLAT_X - 2, STAIR_STEPS = 11, STEP_H = PLAT_TOP/STAIR_STEPS, STEP_D = 1.05, STEP_W = 4.2;
+const stairStartZ = PLAT_Z - PLAT_D/2 - STAIR_STEPS*STEP_D;
+const stairStepMeshes = [];
+for(let i=0;i<STAIR_STEPS;i++){
+  const h = STEP_H*(i+1);
+  const z = stairStartZ + i*STEP_D + STEP_D/2;
+  const step = makeBox(STEP_W, h, STEP_D, matConcrete, STAIR_X, h/2, z);
+  addCollider(step);
+  stairStepMeshes.push(step);
+  if(i%3===0){ // hazard nosing stripe on some steps
+    makeBox(STEP_W, 0.06, 0.14, matHazard, STAIR_X, h+0.03, z+STEP_D/2-0.07, false);
+  }
+}
+// side rails (visual only, not colliders)
+makeBox(0.15, 4.2, STAIR_STEPS*STEP_D, matConcrete, STAIR_X-STEP_W/2, 2.1, stairStartZ+(STAIR_STEPS*STEP_D)/2, false);
+makeBox(0.15, 4.2, STAIR_STEPS*STEP_D, matConcrete, STAIR_X+STEP_W/2, 2.1, stairStartZ+(STAIR_STEPS*STEP_D)/2, false);
+
+// ---- Crates scattered around the yard ----
+const crateSpecs = [
+  {x:-20,z:-10,h:1.3, coin:true},
+  {x:-15,z:16, h:1.3, coin:true},
+  {x:19, z:-19,h:1.3, coin:true},
+  {x:-9, z:23, h:1.5, coin:true},
+  {x:26, z:6,  h:1.3, coin:true},
+  {x:-25,z:6,  h:1.3, coin:false},   // obstacle / cover for hidden coin
+  {x:1,  z:-25,h:1.3, coin:false},   // pair -> narrow gap
+  {x:3.4,z:-25,h:1.3, coin:false},   // pair -> narrow gap
+  {x:-30,z:-22,h:1.6, coin:true},
+  {x:22, z:22, h:1.3, coin:true},
+];
+crateSpecs.forEach(c=>{
+  const size = 1.5;
+  const crate = makeBox(size, c.h, size, matCrate, c.x, c.h/2, c.z);
+  addCollider(crate);
+  if(c.coin) queueCoin(c.x, c.h+0.45, c.z);
+});
+
+/* ============================= COINS ============================= */
+function makeCoinMesh(){
+  const geo = new THREE.TorusGeometry(0.42, 0.16, 12, 24);
+  const mesh = new THREE.Mesh(geo, matCoin);
+  mesh.castShadow = true;
+  mesh.rotation.x = Math.PI/2;
+  return mesh;
+}
+function queueCoin(x,y,z){
+  const mesh = makeCoinMesh();
+  mesh.position.set(x,y,z);
+  scene.add(mesh);
+  coins.push({mesh, collected:false, baseY:y, phase:Math.random()*Math.PI*2});
+}
+
+// Ground-scattered coins (open yard)
+[[-30,2],[-25,-27],[-9,-31],[6,31],[22,27],[32,-3],[-3,12],[16,-4],[-33,20],[30,18]]
+  .forEach(([x,z])=> queueCoin(x, 0.55, z));
+
+// Stair coins
+[2,5,8].forEach(i=>{
+  const step = stairStepMeshes[i];
+  queueCoin(step.position.x, step.position.y + STEP_H*(i+1)/2 + 0.5, step.position.z);
+});
+
+// Rooftop coins
+[[PLAT_X-4,PLAT_Z+4],[PLAT_X+3,PLAT_Z-2],[PLAT_X+4,PLAT_Z+4]]
+  .forEach(([x,z])=> queueCoin(x, PLAT_TOP+0.55, z));
+
+// Hidden coins (tucked away — reward exploration)
+queueCoin(-37, 0.55, -37);                 // far corner
+queueCoin(2.2, 0.55, -25);                 // squeezed between the two paired crates
+queueCoin(STAIR_X, 0.55, stairStartZ-1.5); // in the shadow behind the staircase
+
+const TOTAL_COINS = coins.length;
+
+/* ============================= AUDIO (tiny synth beep) ============================= */
+let audioCtx = null;
+function ensureAudio(){ if(!audioCtx){ try{ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } }
+function playCoinSound(){
+  if(!audioCtx) return;
+  const t0 = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(880, t0);
+  osc.frequency.exponentialRampToValueAtTime(1760, t0+0.09);
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(0.18, t0+0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0+0.28);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(t0); osc.stop(t0+0.3);
+}
+
+/* ============================= PLAYER ============================= */
+const player = {
+  pos: new THREE.Vector3(0, 1, -32),
+  vel: new THREE.Vector3(0,0,0),
+  yaw: Math.PI,   // face north into the yard
+  pitch: 0,
+  grounded: true,
+};
+
+const keys = {};
+window.addEventListener('keydown', e=>{
+  keys[e.code] = true;
+  if(e.code === 'Space') e.preventDefault();
+});
+window.addEventListener('keyup', e=>{ keys[e.code] = false; });
+
+let pointerLocked = false;
+document.addEventListener('pointerlockchange', ()=>{
+  pointerLocked = (document.pointerLockElement === canvas);
+  if(!pointerLocked && gameState === 'playing'){
+    setState('paused');
+  }
+});
+window.addEventListener('mousemove', e=>{
+  if(!pointerLocked) return;
+  player.yaw   -= e.movementX * MOUSE_SENS;
+  player.pitch -= e.movementY * MOUSE_SENS;
+  const lim = Math.PI/2 - 0.05;
+  player.pitch = Math.max(-lim, Math.min(lim, player.pitch));
+});
+
+const downRay = new THREE.Raycaster();
+downRay.far = 200;
+const DOWN = new THREE.Vector3(0,-1,0);
+function groundHeightAt(x,z){
+  downRay.set(new THREE.Vector3(x, 120, z), DOWN);
+  const hits = downRay.intersectObjects(colliders, false);
+  return hits.length ? hits[0].point.y : 0;
+}
+
+function updatePlayer(dt){
+  const forwardInput = (keys['KeyW']||keys['ArrowUp']?1:0) - (keys['KeyS']||keys['ArrowDown']?1:0);
+  const strafeInput  = (keys['KeyD']||keys['ArrowRight']?1:0) - (keys['KeyA']||keys['ArrowLeft']?1:0);
+  const speed = (keys['ShiftLeft']||keys['ShiftRight']) ? RUN_SPEED : WALK_SPEED;
+
+  let dx=0, dz=0;
+  if(forwardInput || strafeInput){
+    const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw);
+    const rx =  Math.cos(player.yaw), rz = -Math.sin(player.yaw);
+    dx = fx*forwardInput + rx*strafeInput;
+    dz = fz*forwardInput + rz*strafeInput;
+    const len = Math.hypot(dx,dz) || 1;
+    dx = dx/len * speed * dt;
+    dz = dz/len * speed * dt;
+  }
+
+  let candX = player.pos.x + dx;
+  let candZ = player.pos.z + dz;
+  candX = Math.max(-BOUND, Math.min(BOUND, candX));
+  candZ = Math.max(-BOUND, Math.min(BOUND, candZ));
+
+  if(dx!==0 || dz!==0){
+    const candGround = groundHeightAt(candX, candZ);
+    if(player.grounded && (candGround - player.pos.y) > STEP_LIMIT){
+      // wall / crate side too tall to just walk up — block horizontal move
+    } else {
+      player.pos.x = candX;
+      player.pos.z = candZ;
+    }
+  }
+
+  if(keys['Space'] && player.grounded){
+    player.vel.y = JUMP_SPEED;
+    player.grounded = false;
+  }
+
+  player.vel.y += GRAVITY * dt;
+  player.pos.y += player.vel.y * dt;
+
+  const gH = groundHeightAt(player.pos.x, player.pos.z);
+  if(player.pos.y <= gH){
+    player.pos.y = gH;
+    player.vel.y = 0;
+    player.grounded = true;
+  } else {
+    player.grounded = false;
+  }
+
+  camera.position.set(player.pos.x, player.pos.y + EYE_HEIGHT, player.pos.z);
+  camera.rotation.y = player.yaw;
+  camera.rotation.x = player.pitch;
+}
+
+/* ============================= COIN COLLECTION ============================= */
+let collectedCount = 0;
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+function showToast(msg){
+  toastEl.textContent = msg;
+  toastEl.style.opacity = '1';
+  toastEl.style.transform = 'translate(-50%,-4px)';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>{ toastEl.style.opacity='0'; toastEl.style.transform='translate(-50%,0)'; }, 1100);
+}
+
+function updateCoins(dt, t){
+  for(const c of coins){
+    if(c.collected) continue;
+    c.mesh.rotation.z += dt*1.6;
+    c.mesh.position.y = c.baseY + Math.sin(t*2 + c.phase)*0.12;
+
+    const dx = c.mesh.position.x - player.pos.x;
+    const dz = c.mesh.position.z - player.pos.z;
+    const dy = c.mesh.position.y - (player.pos.y + EYE_HEIGHT*0.55);
+    if(dx*dx + dz*dz < COIN_RADIUS*COIN_RADIUS && Math.abs(dy) < 2.0){
+      c.collected = true;
+      scene.remove(c.mesh);
+      collectedCount++;
+      playCoinSound();
+      updateHudCoins();
+      showToast(collectedCount===TOTAL_COINS ? 'ALL COINS RECOVERED!' : 'COIN RECOVERED');
+      if(collectedCount === TOTAL_COINS){
+        winGame();
+      }
+    }
+  }
+}
+
+/* ============================= HUD / STATE ============================= */
+const hud = document.getElementById('hud');
+const coinCountText = document.getElementById('coinCountText');
+const timerText = document.getElementById('timerText');
+const timerHud = document.getElementById('timerHud');
+const hintBar = document.getElementById('hintBar');
+
+function updateHudCoins(){ coinCountText.textContent = `${collectedCount} / ${TOTAL_COINS}`; }
+function fmtTime(s){
+  s = Math.max(0, Math.ceil(s));
+  const m = Math.floor(s/60), sec = s%60;
+  return String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+}
+
+let gameState = 'start'; // start | playing | paused | won | lost
+let remaining = GAME_SECONDS;
+let lastFrame = null;
+
+const screens = {
+  start: document.getElementById('startScreen'),
+  paused: document.getElementById('pauseScreen'),
+  won: document.getElementById('winScreen'),
+  lost: document.getElementById('loseScreen'),
+};
+function setState(s){
+  gameState = s;
+  Object.values(screens).forEach(el=>el.classList.add('hidden'));
+  if(s==='start') screens.start.classList.remove('hidden');
+  if(s==='paused') screens.paused.classList.remove('hidden');
+  if(s==='won') screens.won.classList.remove('hidden');
+  if(s==='lost') screens.lost.classList.remove('hidden');
+  hud.style.display = (s==='playing') ? 'block' : 'none';
+}
+
+function startGame(){
+  ensureAudio();
+  collectedCount = 0;
+  remaining = GAME_SECONDS;
+  player.pos.set(0,1,-32);
+  player.vel.set(0,0,0);
+  player.yaw = Math.PI;
+  player.pitch = 0;
+  coins.forEach(c=>{
+    if(c.collected){ scene.add(c.mesh); }
+    c.collected = false;
+  });
+  updateHudCoins();
+  timerHud.classList.remove('warn');
+  hintBar.style.opacity = '1';
+  setTimeout(()=>{ if(gameState==='playing') hintBar.style.opacity='0'; }, 6000);
+  setState('playing');
+  lastFrame = null;
+  canvas.requestPointerLock();
+}
+
+function winGame(){
+  setState('won');
+  document.getElementById('resultCount').textContent = `${collectedCount} / ${TOTAL_COINS}`;
+  document.getElementById('resultTime').textContent = fmtTime(remaining);
+  if(document.pointerLockElement) document.exitPointerLock();
+}
+function loseGame(){
+  setState('lost');
+  document.getElementById('loseCount').textContent = `${collectedCount} / ${TOTAL_COINS}`;
+  if(document.pointerLockElement) document.exitPointerLock();
+}
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtnWin').addEventListener('click', startGame);
+document.getElementById('restartBtnLose').addEventListener('click', startGame);
+document.getElementById('resumeBtn').addEventListener('click', ()=>{
+  canvas.requestPointerLock();
+});
+canvas.addEventListener('click', ()=>{
+  if(gameState==='playing' && !pointerLocked) canvas.requestPointerLock();
+});
+
+/* ============================= MAIN LOOP ============================= */
+function tick(now){
+  requestAnimationFrame(tick);
+  if(lastFrame===null) lastFrame = now;
+  let dt = (now - lastFrame)/1000;
+  lastFrame = now;
+  dt = Math.min(dt, 0.05);
+
+  if(gameState==='playing'){
+    remaining -= dt;
+    updatePlayer(dt);
+    updateCoins(dt, now/1000);
+
+    timerText.textContent = fmtTime(remaining);
+    timerHud.classList.toggle('warn', remaining <= 300);
+
+    if(remaining <= 0){
+      remaining = 0;
+      timerText.textContent = fmtTime(0);
+      loseGame();
+    }
+  }
+
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(tick);
+
+})();
+</script>
+</body>
+</html>
